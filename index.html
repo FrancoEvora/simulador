@@ -158,6 +158,23 @@ h1{
   color:var(--muted);
   font-size:12px;
 }
+.editableValue{
+  min-width:42px;
+  padding:2px 5px;
+  border-radius:7px;
+  outline:none;
+  cursor:text;
+  border:1px solid transparent;
+}
+.editableValue:hover{
+  border-color:rgba(244,203,164,.24);
+  background:rgba(255,255,255,.04);
+}
+.editableValue:focus{
+  border-color:var(--orange2);
+  background:rgba(227,145,84,.11);
+  box-shadow:0 0 0 3px rgba(227,145,84,.12);
+}
 input[type=range]{
   width:100%;
   height:32px;
@@ -564,10 +581,10 @@ th{
             <div class="value"><span id="lotRateOut">8,0</span><small>% ao ano</small></div>
           </div>
           <div class="btnrow">
-            <div class="label">Modelo do lote</div>
+            <div class="label">Sistema do lote</div>
             <div class="options two">
-              <button type="button" class="opt active" id="lotPriceBtn">Price</button>
-              <button type="button" class="opt" id="lotLinearBtn">Linear</button>
+              <button type="button" class="opt active" id="lotPriceBtn">Estável (Price)</button>
+              <button type="button" class="opt" id="lotLinearBtn">Decrescente (SAC)</button>
             </div>
           </div>
 
@@ -645,8 +662,8 @@ th{
           <div class="btnrow">
             <div class="label">Sistema da construção</div>
             <div class="options two">
-              <button type="button" class="opt active" id="buildSacBtn">SAC</button>
-              <button type="button" class="opt" id="buildPriceBtn">Price</button>
+              <button type="button" class="opt active" id="buildSacBtn">Decrescente (SAC)</button>
+              <button type="button" class="opt" id="buildPriceBtn">Estável (Price)</button>
             </div>
           </div>
           <div class="btnrow">
@@ -828,12 +845,14 @@ th{
   </section>
 
   <p class="fine">
-    Simulação ilustrativa. O valor do lote e o valor da construção são apresentados em conjunto para planejamento do cliente, mas representam contratos independentes. O “desembolso mensal combinado” não equivale a parcela única contratual. Valores sujeitos à análise de crédito, condições comerciais, correção, seguros, tarifas e CET.
+    Simulação ilustrativa. Os valores nos campos à direita também podem ser digitados diretamente, além do uso das barras. O valor do lote e o valor da construção são apresentados em conjunto para planejamento do cliente, mas representam contratos independentes. O “desembolso mensal combinado” não equivale a parcela única contratual. Valores sujeitos à análise de crédito, condições comerciais, correção, seguros, tarifas e CET.
   </p>
 </main>
 <div id="toast" class="toast">Resumo copiado.</div>
 
 <script>
+
+
 
 
 
@@ -1174,13 +1193,13 @@ th{
     updateButtons();
 
     el("lotBlockPaymentOut").textContent = fmt2.format(r.lot.first);
-    el("lotBlockDetailOut").textContent = (state.lotMode === "PRICE" ? "Price" : "Linear") + " • " + val("lotTerm") + " meses";
+    el("lotBlockDetailOut").textContent = (state.lotMode === "PRICE" ? "Estável (Price)" : "Decrescente (SAC)") + " • " + val("lotTerm") + " meses";
     el("lotBlockFinancedOut").textContent = fmt0.format(r.lotPrincipal);
     el("lotBlockBalloonOut").textContent = fmt0.format(r.lot.totalBalloon);
     el("lotBlockBalloonDetailOut").textContent = state.lotBalloon === "none" ? "sem reforços" : r.lotPlan.qty + (r.lotPlan.qty === 1 ? " reforço" : " reforços");
 
     el("buildBlockPaymentOut").textContent = fmt2.format(r.build.first);
-    el("buildBlockDetailOut").textContent = (state.buildMode === "PRICE" ? "Price recalculada pelos balões" : "SAC") + " • início no mês " + r.start;
+    el("buildBlockDetailOut").textContent = (state.buildMode === "PRICE" ? "Estável (Price)" : "Decrescente (SAC)") + " • início no mês " + r.start;
     el("buildBlockNoBalloonOut").textContent = fmt2.format(r.buildNoBalloon.first);
     el("buildBlockReductionOut").textContent = fmt2.format(Math.max(0, r.buildNoBalloon.first - r.build.first));
     el("buildBlockBalloonOut").textContent = fmt0.format(r.build.totalBalloon);
@@ -1347,6 +1366,119 @@ th{
     render();
   }
 
+
+  function clampNumber(value, min, max, step) {
+    var v = Number(value);
+    if (!isFinite(v)) return null;
+    if (isFinite(min)) v = Math.max(min, v);
+    if (isFinite(max)) v = Math.min(max, v);
+    if (step && step > 0) v = Math.round(v / step) * step;
+    return v;
+  }
+
+  function parseEditableNumber(text) {
+    var raw = String(text || "")
+      .replace(/\s/g, "")
+      .replace(/R\$/gi, "")
+      .replace(/%/g, "")
+      .replace(/meses?/gi, "")
+      .replace(/anos?/gi, "")
+      .replace(/mês/gi, "")
+      .replace(/mes/gi, "")
+      .replace(/de.*$/i, "");
+
+    // pt-BR: 1.234.567,89 -> 1234567.89
+    if (raw.indexOf(",") >= 0) {
+      raw = raw.replace(/\./g, "").replace(",", ".");
+    } else {
+      // For currency-like integers: 1.234.567 -> 1234567
+      var dots = (raw.match(/\./g) || []).length;
+      if (dots > 0) raw = raw.replace(/\./g, "");
+    }
+
+    raw = raw.replace(/[^0-9.\-]/g, "");
+    if (!raw || raw === "." || raw === "-") return null;
+    return Number(raw);
+  }
+
+  function makeEditableOutput(spanId, rangeId, opts) {
+    var out = el(spanId);
+    var range = el(rangeId);
+    if (!out || !range) return;
+
+    out.classList.add("editableValue");
+    out.setAttribute("contenteditable", "true");
+    out.setAttribute("tabindex", "0");
+    out.setAttribute("title", "Clique para digitar um valor");
+
+    out.addEventListener("focus", function() {
+      var selection = window.getSelection();
+      var rangeSel = document.createRange();
+      rangeSel.selectNodeContents(out);
+      selection.removeAllRanges();
+      selection.addRange(rangeSel);
+    });
+
+    out.addEventListener("keydown", function(ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        out.blur();
+      }
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        render();
+        out.blur();
+      }
+    });
+
+    out.addEventListener("blur", function() {
+      var parsed = parseEditableNumber(out.textContent);
+      if (parsed === null) {
+        render();
+        return;
+      }
+
+      var min = Number(range.min);
+      var max = Number(range.max);
+      var step = Number(range.step || 1);
+
+      if (opts && opts.integer) parsed = Math.round(parsed);
+      if (opts && opts.percent) parsed = Math.max(0, parsed);
+
+      var finalValue = clampNumber(parsed, min, max, step);
+      if (finalValue === null) {
+        render();
+        return;
+      }
+
+      range.value = finalValue;
+      render();
+    });
+  }
+
+  function initEditableOutputs() {
+    [
+      ["lotValueOut", "lotValue", {integer:true}],
+      ["lotDownOut", "lotDown", {integer:true, percent:true}],
+      ["lotTermOut", "lotTerm", {integer:true}],
+      ["lotRateOut", "lotRate", {}],
+      ["lotBalloonQtyOut", "lotBalloonQty", {integer:true}],
+      ["lotBalloonValueOut", "lotBalloonValue", {integer:true}],
+
+      ["buildValueOut", "buildValue", {integer:true}],
+      ["buildDownOut", "buildDown", {integer:true, percent:true}],
+      ["buildTermOut", "buildTerm", {integer:true}],
+      ["buildRateOut", "buildRate", {}],
+      ["buildBalloonQtyOut", "buildBalloonQty", {integer:true}],
+      ["buildBalloonValueOut", "buildBalloonValue", {integer:true}],
+
+      ["buildStartOut", "buildStart", {integer:true}],
+      ["incomePctOut", "incomePct", {integer:true, percent:true}]
+    ].forEach(function(item) {
+      makeEditableOutput(item[0], item[1], item[2] || {});
+    });
+  }
+
   [
     "lotValue","lotDown","lotTerm","lotRate","lotBalloonQty","lotBalloonValue",
     "buildValue","buildDown","buildTerm","buildRate","buildBalloonQty","buildBalloonValue",
@@ -1390,8 +1522,11 @@ th{
   el("printBtn").addEventListener("click", function(){ window.print(); });
   el("csvBtn").addEventListener("click", downloadCsv);
 
+  initEditableOutputs();
   render();
 })();
+
+
 
 
 
